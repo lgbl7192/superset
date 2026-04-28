@@ -301,10 +301,17 @@ SQLGLOT_DIALECTS_EXTENSIONS: DialectExtensions | Callable[[], DialectExtensions]
 # The limit of queries fetched for query search
 QUERY_SEARCH_LIMIT = 1000
 
-# Flask-WTF flag for CSRF
+# SECURITY: CSRF protection is mandatory for all state-changing API endpoints
+# (POST, PUT, DELETE, PATCH). Setting this to False disables CSRF validation
+# globally, exposing all mutation endpoints (dashboards, charts, datasets, etc.)
+# to cross-site request forgery attacks. Only disable in testing environments.
+# See: https://owasp.org/www-community/attacks/csrf
 WTF_CSRF_ENABLED = True
 
-# Add endpoints that need to be exempt from CSRF protection
+# Endpoints exempt from CSRF protection. Only add endpoints here that use
+# alternative authentication (e.g., token-based auth) or are read-only.
+# SECURITY WARNING: Adding state-changing endpoints to this list without
+# alternative protection (e.g., API tokens) creates a CSRF vulnerability.
 WTF_CSRF_EXEMPT_LIST = [
     "superset.charts.data.api.data",
     "superset.dashboards.api.cache_dashboard_screenshot",
@@ -1653,7 +1660,9 @@ FAB_API_KEY_PREFIXES = ["sst_"]
 # It will be appended at the bottom of sql_lab errors.
 TROUBLESHOOTING_LINK = ""
 
-# CSRF token timeout, set to None for a token that never expires
+# CSRF token timeout, set to None for a token that never expires.
+# A shorter timeout increases security but may cause usability issues
+# for long-running sessions.
 WTF_CSRF_TIME_LIMIT = int(timedelta(weeks=1).total_seconds())
 
 # This link should lead to a page with instructions on how to gain access to a

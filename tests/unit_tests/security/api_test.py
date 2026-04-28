@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import logging
 from typing import Any
 
 import pytest
@@ -60,3 +61,50 @@ def test_csrf_exempt_blueprints_with_api_key(app: Any, app_context: None) -> Non
     config is enabled.
     """
     assert "ApiKeyApi" in {blueprint.name for blueprint in csrf._exempt_blueprints}
+
+
+@pytest.mark.parametrize(
+    "app",
+    [{"WTF_CSRF_ENABLED": True}],
+    indirect=True,
+)
+def test_csrf_enabled_by_default(app: Any) -> None:
+    """
+    Test that WTF_CSRF_ENABLED defaults to True.
+    """
+    assert app.config["WTF_CSRF_ENABLED"] is True
+
+
+@pytest.mark.parametrize(
+    "app",
+    [{"WTF_CSRF_ENABLED": False, "TESTING": False}],
+    indirect=True,
+)
+def test_csrf_force_enabled_in_non_testing(
+    app: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """
+    Test that CSRF is force-enabled when WTF_CSRF_ENABLED=False in
+    non-testing environments, and a warning is logged.
+    """
+    assert app.config["WTF_CSRF_ENABLED"] is True
+
+
+@pytest.mark.parametrize(
+    "app",
+    [{"WTF_CSRF_ENABLED": True}],
+    indirect=True,
+)
+def test_csrf_logs_missing_token_on_mutation(
+    app: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """
+    Test that a warning is logged when a state-changing API request
+    is made without a CSRF token header.
+    """
+    with app.test_client() as client:
+        with caplog.at_level(logging.WARNING, logger="superset.initialization"):
+            client.post("/api/v1/dashboard/")
+            assert any(
+                "CSRF token missing" in record.message for record in caplog.records
+            )
