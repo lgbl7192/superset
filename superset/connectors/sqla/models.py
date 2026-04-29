@@ -81,6 +81,7 @@ from superset.db_engine_specs.base import BaseEngineSpec, TimestampExpression
 from superset.exceptions import (
     ColumnNotFoundException,
     DatasetInvalidPermissionEvaluationException,
+    QueryClauseValidationException,
     QueryObjectValidationError,
     SupersetGenericDBErrorException,
     SupersetSecurityException,
@@ -104,7 +105,7 @@ from superset.models.helpers import (
 )
 from superset.models.slice import Slice
 from superset.models.sql_types.base import CurrencyType
-from superset.sql.parse import Table
+from superset.sql.parse import sanitize_clause, Table
 from superset.superset_typing import (
     AdhocColumn,
     AdhocMetric,
@@ -1148,6 +1149,18 @@ class SqlMetric(AuditMixinNullable, ImportExportMixin, CertificationMixin, Model
                         msg=msg,
                     )
                 ) from ex
+
+        # Validate the expression through sqlglot AST parsing to reject
+        # stacked statements and other SQL injection patterns (e.g.
+        # "SUM(1); DROP TABLE ...").  Adhoc metrics are already validated
+        # via _process_select_expression; stored metrics must receive the
+        # same treatment.
+        try:
+            expression = sanitize_clause(expression, self.table.database.backend)
+        except QueryClauseValidationException as ex:
+            raise QueryObjectValidationError(
+                _("Invalid SQL in metric expression: %(msg)s", msg=str(ex))
+            ) from ex
 
         sqla_col: ColumnClause = literal_column(expression)
         return self.table.database.make_sqla_column_compatible(sqla_col, label)
