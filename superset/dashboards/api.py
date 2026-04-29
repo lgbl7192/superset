@@ -142,6 +142,7 @@ from superset.utils.urls import get_url_path
 from superset.views.base_api import (
     BaseSupersetModelRestApi,
     RelatedFieldFilter,
+    require_csrf,
     requires_form_data,
     requires_json,
     statsd_metrics,
@@ -689,6 +690,7 @@ class DashboardRestApi(CustomTagsOptimizationMixin, BaseSupersetModelRestApi):
     @expose("/", methods=("POST",))
     @protect()
     @safe
+    @require_csrf
     @statsd_metrics
     @event_logger.log_this_with_context(
         action=lambda self, *args, **kwargs: f"{self.__class__.__name__}.post",
@@ -750,6 +752,7 @@ class DashboardRestApi(CustomTagsOptimizationMixin, BaseSupersetModelRestApi):
     @expose("/<pk>", methods=("PUT",))
     @protect()
     @safe
+    @require_csrf
     @statsd_metrics
     @event_logger.log_this_with_context(
         action=lambda self, *args, **kwargs: f"{self.__class__.__name__}.put",
@@ -1082,6 +1085,7 @@ class DashboardRestApi(CustomTagsOptimizationMixin, BaseSupersetModelRestApi):
     @expose("/<pk>", methods=("DELETE",))
     @protect()
     @safe
+    @require_csrf
     @statsd_metrics
     @event_logger.log_this_with_context(
         action=lambda self, *args, **kwargs: f"{self.__class__.__name__}.delete",
