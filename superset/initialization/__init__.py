@@ -19,7 +19,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import sys
 from typing import Any, Callable, TYPE_CHECKING
 
 import wtforms_json
@@ -37,7 +36,10 @@ from flask_compress import Compress
 from flask_session import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from superset.constants import CHANGE_ME_SECRET_KEY
+from superset.constants import (
+    KNOWN_INSECURE_SECRET_KEYS,
+    SECRET_KEY_MIN_LENGTH,
+)
 from superset.databases.utils import make_url_safe
 from superset.extensions import (
     _event_logger,
@@ -626,33 +628,57 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         self.init_all_dependencies_and_extensions()
 
     def check_secret_key(self) -> None:
-        def log_default_secret_key_warning() -> None:
-            top_banner = 80 * "-" + "\n" + 36 * " " + "WARNING\n" + 80 * "-"
-            bottom_banner = 80 * "-" + "\n" + 80 * "-"
-            logger.warning(top_banner)
-            logger.warning(
-                "A Default SECRET_KEY was detected, please use superset_config.py "
-                "to override it.\n"
-                "Use a strong complex alphanumeric string and use a tool to help"
-                " you generate \n"
-                "a sufficiently random sequence, ex: openssl rand -base64 42 \n"
-                "For more info, see: https://superset.apache.org/docs/"
-                "configuration/configuring-superset#specifying-a-secret_key"
-            )
-            logger.warning(bottom_banner)
+        """Validate that the configured SECRET_KEY is safe for production.
 
-        if self.config["SECRET_KEY"] == CHANGE_ME_SECRET_KEY:
-            if (
-                self.superset_app.debug
-                or self.superset_app.config["TESTING"]
-                or is_test()
-            ):
-                logger.warning("Debug mode identified with default secret key")
-                log_default_secret_key_warning()
-                return
-            log_default_secret_key_warning()
-            logger.error("Refusing to start due to insecure SECRET_KEY")
-            sys.exit(1)
+        Raises ``RuntimeError`` in non-debug/non-test mode when:
+        * the key matches any value in ``KNOWN_INSECURE_SECRET_KEYS``
+          (CVE-2023-27524 and common placeholder strings), **or**
+        * the key is shorter than ``SECRET_KEY_MIN_LENGTH`` characters.
+        """
+
+        def _log_insecure_key_warning(reason: str) -> None:
+            banner = 80 * "-"
+            logger.warning("%s\n%sWARNING\n%s", banner, " " * 36, banner)
+            logger.warning(
+                "%s "
+                "Override SECRET_KEY in superset_config.py or set the "
+                "SUPERSET_SECRET_KEY environment variable.\n"
+                "Use a strong complex alphanumeric string and use a tool to "
+                "help you generate\n"
+                "a sufficiently random sequence, ex: openssl rand -base64 42\n"
+                "For more info, see: https://superset.apache.org/docs/"
+                "configuration/configuring-superset#specifying-a-secret_key",
+                reason,
+            )
+            logger.warning(banner)
+
+        secret_key: str = self.config["SECRET_KEY"]
+        is_known_default = secret_key in KNOWN_INSECURE_SECRET_KEYS
+        is_too_short = len(secret_key) < SECRET_KEY_MIN_LENGTH
+        is_insecure = is_known_default or is_too_short
+
+        if not is_insecure:
+            return
+
+        if is_known_default:
+            reason = "A known insecure default SECRET_KEY was detected."
+        else:
+            reason = (
+                f"SECRET_KEY is too short ({len(secret_key)} chars). "
+                f"Minimum length is {SECRET_KEY_MIN_LENGTH} characters."
+            )
+
+        if self.superset_app.debug or self.superset_app.config["TESTING"] or is_test():
+            logger.warning("Debug/test mode identified with insecure SECRET_KEY")
+            _log_insecure_key_warning(reason)
+            return
+
+        _log_insecure_key_warning(reason)
+        raise RuntimeError(
+            f"Refusing to start due to insecure SECRET_KEY. {reason} "
+            "Set a secure SECRET_KEY of at least "
+            f"{SECRET_KEY_MIN_LENGTH} characters."
+        )
 
     def configure_session(self) -> None:
         if self.config["SESSION_SERVER_SIDE"]:

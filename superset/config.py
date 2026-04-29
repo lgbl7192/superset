@@ -230,7 +230,9 @@ HASH_ALGORITHM_FALLBACKS: list[Literal["md5", "sha256"]] = ["md5"]
 # Your App secret key. Make sure you override it on superset_config.py
 # or use `SUPERSET_SECRET_KEY` environment variable.
 # Use a strong complex alphanumeric string and use a tool to help you generate
-# a sufficiently random sequence, ex: openssl rand -base64 42"
+# a sufficiently random sequence, ex: openssl rand -base64 42
+# A startup check will reject known insecure defaults and keys shorter than 32
+# characters.  See superset/constants.py for the blocklist.
 SECRET_KEY = os.environ.get("SUPERSET_SECRET_KEY") or CHANGE_ME_SECRET_KEY
 
 # The SQLAlchemy connection string.

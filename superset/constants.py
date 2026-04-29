@@ -29,6 +29,23 @@ EMPTY_STRING = "<empty string>"
 
 CHANGE_ME_SECRET_KEY = "CHANGE_ME_TO_A_COMPLEX_RANDOM_SECRET"  # noqa: S105
 
+# Minimum acceptable length for SECRET_KEY in production
+SECRET_KEY_MIN_LENGTH = 32
+
+# Known insecure default SECRET_KEY values (CVE-2023-27524 and variants).
+# The startup check rejects any key found in this set.
+KNOWN_INSECURE_SECRET_KEYS: frozenset[str] = frozenset(  # noqa: S105
+    {
+        CHANGE_ME_SECRET_KEY,
+        "thisismysecretkey",
+        r"\x02\x01thisismyscretkey",
+        "thisISnotanSECRET_key!!",
+        "USE_YOUR_OWN_SECURE_RANDOM_KEY",
+        "YOUR_OWN_RANDOM_GENERATED_SECRET_KEY",
+        "TEST_NON_DEV_SECRET",
+    }
+)
+
 # UUID for the examples database
 EXAMPLES_DB_UUID = "a2dc77af-e654-49bb-b321-40f6b559a1ee"
 

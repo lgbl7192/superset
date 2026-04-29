@@ -17,6 +17,14 @@
 #
 set -e
 
+# Auto-generate SUPERSET_SECRET_KEY if missing or set to a placeholder value
+if [ -z "$SUPERSET_SECRET_KEY" ] || echo "$SUPERSET_SECRET_KEY" | grep -qi "REPLACE_WITH"; then
+    SUPERSET_SECRET_KEY=$(openssl rand -base64 42)
+    export SUPERSET_SECRET_KEY
+    echo "WARNING: SUPERSET_SECRET_KEY was not set. A random key has been generated."
+    echo "WARNING: Set SUPERSET_SECRET_KEY in docker/.env for persistence across restarts."
+fi
+
 #
 # Always install local overrides first
 #

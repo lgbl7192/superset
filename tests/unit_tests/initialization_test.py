@@ -18,6 +18,7 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
@@ -188,6 +189,86 @@ class TestSupersetAppInitializer:
             app_initializer._db_uri_cache
             == "postgresql://realuser:realpass@realhost:5432/realdb"
         )
+
+
+class TestCheckSecretKey:
+    """Tests for SupersetAppInitializer.check_secret_key()."""
+
+    @staticmethod
+    def _make_initializer(
+        secret_key: str,
+        debug: bool = False,
+        testing: bool = False,
+    ) -> SupersetAppInitializer:
+        mock_app = MagicMock()
+        mock_app.debug = debug
+        mock_app.config = {"SECRET_KEY": secret_key, "TESTING": testing}
+        return SupersetAppInitializer(mock_app)
+
+    def test_raises_for_known_insecure_default(self) -> None:
+        with patch("superset.initialization.is_test", return_value=False):
+            initializer = self._make_initializer(
+                secret_key="CHANGE_ME_TO_A_COMPLEX_RANDOM_SECRET"  # noqa: S106
+            )
+            with pytest.raises(RuntimeError, match="known insecure default"):
+                initializer.check_secret_key()
+
+    def test_raises_for_cve_2023_27524_keys(self) -> None:
+        with patch("superset.initialization.is_test", return_value=False):
+            initializer = self._make_initializer(
+                secret_key="thisismysecretkey",  # noqa: S106
+            )
+            with pytest.raises(RuntimeError, match="known insecure default"):
+                initializer.check_secret_key()
+
+    def test_raises_for_short_key(self) -> None:
+        with patch("superset.initialization.is_test", return_value=False):
+            initializer = self._make_initializer(
+                secret_key="tooshort",  # noqa: S106
+            )
+            with pytest.raises(RuntimeError, match="too short"):
+                initializer.check_secret_key()
+
+    def test_allows_secure_key(self) -> None:
+        with patch("superset.initialization.is_test", return_value=False):
+            secure_key = "a" * 42  # well above the 32-char minimum
+            initializer = self._make_initializer(secret_key=secure_key)
+            initializer.check_secret_key()  # should not raise
+
+    def test_warns_but_allows_insecure_key_in_debug(self) -> None:
+        with (
+            patch("superset.initialization.is_test", return_value=False),
+            patch("superset.initialization.logger") as mock_logger,
+        ):
+            initializer = self._make_initializer(
+                secret_key="CHANGE_ME_TO_A_COMPLEX_RANDOM_SECRET",  # noqa: S106
+                debug=True,
+            )
+            initializer.check_secret_key()  # should not raise
+            mock_logger.warning.assert_any_call(
+                "Debug/test mode identified with insecure SECRET_KEY"
+            )
+
+    def test_warns_but_allows_short_key_in_testing(self) -> None:
+        with (
+            patch("superset.initialization.is_test", return_value=False),
+            patch("superset.initialization.logger") as mock_logger,
+        ):
+            initializer = self._make_initializer(
+                secret_key="short",  # noqa: S106
+                testing=True,
+            )
+            initializer.check_secret_key()  # should not raise
+            mock_logger.warning.assert_any_call(
+                "Debug/test mode identified with insecure SECRET_KEY"
+            )
+
+    def test_warns_but_allows_insecure_key_in_is_test(self) -> None:
+        with patch("superset.initialization.is_test", return_value=True):
+            initializer = self._make_initializer(
+                secret_key="TEST_NON_DEV_SECRET",  # noqa: S106
+            )
+            initializer.check_secret_key()  # should not raise
 
 
 class TestCreateAppRoot:
