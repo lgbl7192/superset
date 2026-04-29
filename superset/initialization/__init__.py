@@ -941,11 +941,21 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         migrate.init_app(self.superset_app, db=db, directory=APP_DIR + "/migrations")
 
     def configure_wtf(self) -> None:
-        if self.config["WTF_CSRF_ENABLED"]:
-            csrf.init_app(self.superset_app)
-            csrf_exempt_list = self.config["WTF_CSRF_EXEMPT_LIST"]
-            for ex in csrf_exempt_list:
-                csrf.exempt(ex)
+        # Always initialize CSRF infrastructure so token generation and
+        # validation helpers are available even when the global enforcement
+        # flag is turned off.
+        csrf.init_app(self.superset_app)
+        csrf_exempt_list = self.config["WTF_CSRF_EXEMPT_LIST"]
+        for ex in csrf_exempt_list:
+            csrf.exempt(ex)
+
+        if not self.config["WTF_CSRF_ENABLED"]:
+            logger.warning(
+                "WTF_CSRF_ENABLED is set to False. Flask-WTF's global CSRF "
+                "check is disabled; state-changing API endpoints rely solely "
+                "on the explicit require_csrf decorator for protection. "
+                "Do not disable CSRF in production."
+            )
 
     def configure_async_queries(self) -> None:
         if feature_flag_manager.is_feature_enabled("GLOBAL_ASYNC_QUERIES"):

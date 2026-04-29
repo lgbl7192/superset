@@ -20,7 +20,7 @@ import functools
 import logging
 from typing import Any, Callable, cast
 
-from flask import request, Response
+from flask import current_app, request, Response
 from flask_appbuilder import Model, ModelRestApi
 from flask_appbuilder.api import (
     BaseApi,
@@ -33,9 +33,11 @@ from flask_appbuilder.models.filters import BaseFilter, Filters
 from flask_appbuilder.models.sqla.filters import FilterStartsWith
 from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_babel import lazy_gettext as _
+from flask_wtf.csrf import validate_csrf
 from marshmallow import fields, Schema
 from sqlalchemy import and_, distinct, func
 from sqlalchemy.orm.query import Query
+from wtforms import ValidationError
 
 from superset import is_feature_enabled
 from superset.exceptions import InvalidPayloadFormatError
@@ -113,6 +115,46 @@ def requires_form_data(f: Callable[..., Any]) -> Callable[..., Any]:
         return f(self, *args, **kwargs)
 
     return functools.update_wrapper(wraps, f)
+
+
+def require_csrf(f: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Enforce CSRF token validation on state-changing requests (POST, PUT,
+    DELETE, PATCH) regardless of the global ``WTF_CSRF_ENABLED`` flag.
+
+    Looks for the token in the ``X-CSRFToken`` header, the ``csrf_token``
+    form field, or the ``X-CSRF-Token`` header—mirroring Flask-WTF's own
+    search order.
+    """
+
+    @functools.wraps(f)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Response:
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            # Skip validation for token-authenticated (non-browser) requests.
+            # Browser sessions carry a cookie; API-token requests do not need
+            # CSRF because the token itself proves intent.
+            if not request.cookies.get(
+                current_app.config.get("SESSION_COOKIE_NAME", "session")
+            ):
+                return f(self, *args, **kwargs)
+
+            token = (
+                request.headers.get("X-CSRFToken")
+                or request.form.get("csrf_token")
+                or request.headers.get("X-CSRF-Token")
+            )
+            try:
+                validate_csrf(token)
+            except ValidationError:
+                logger.warning(
+                    "CSRF validation failed for %s %s",
+                    request.method,
+                    request.path,
+                )
+                return self.response(400, message="CSRF token missing or invalid")
+        return f(self, *args, **kwargs)
+
+    return wrapper
 
 
 def statsd_metrics(f: Callable[..., Any]) -> Callable[..., Any]:
