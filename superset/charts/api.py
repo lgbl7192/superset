@@ -58,6 +58,7 @@ from superset.charts.schemas import (
 from superset.commands.chart.create import CreateChartCommand
 from superset.commands.chart.delete import DeleteChartCommand
 from superset.commands.chart.exceptions import (
+    ChartAccessDeniedError,
     ChartCreateFailedError,
     ChartDeleteFailedError,
     ChartForbiddenError,
@@ -853,6 +854,8 @@ class ChartRestApi(BaseSupersetModelRestApi):
               $ref: '#/components/responses/400'
             401:
               $ref: '#/components/responses/401'
+            403:
+              $ref: '#/components/responses/403'
             404:
               $ref: '#/components/responses/404'
             500:
@@ -871,6 +874,8 @@ class ChartRestApi(BaseSupersetModelRestApi):
                         fp.write(file_content().encode())
             except ChartNotFoundError:
                 return self.response_404()
+            except ChartAccessDeniedError:
+                return self.response_403()
         buf.seek(0)
 
         response = send_file(

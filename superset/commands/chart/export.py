@@ -22,17 +22,20 @@ from typing import Callable
 
 import yaml
 
-from superset.commands.chart.exceptions import ChartNotFoundError
+from superset.commands.chart.exceptions import (
+    ChartAccessDeniedError,
+    ChartNotFoundError,
+)
 from superset.daos.chart import ChartDAO
 from superset.commands.dataset.export import ExportDatasetsCommand
 from superset.commands.export.models import ExportModelsCommand
 from superset.commands.tag.export import ExportTagsCommand
+from superset.extensions import feature_flag_manager, security_manager
 from superset.models.slice import Slice
 from superset.tags.models import TagType
 from superset.utils.dict_import_export import EXPORT_VERSION
 from superset.utils.file import get_filename
 from superset.utils import json
-from superset.extensions import feature_flag_manager
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,16 @@ REMOVE_KEYS = ["datasource_type", "datasource_name", "url_params"]
 class ExportChartsCommand(ExportModelsCommand):
     dao = ChartDAO
     not_found = ChartNotFoundError
+
+    def validate(self) -> None:
+        super().validate()
+
+        # Per-object access check: verify the requesting user can access each
+        # chart, preventing IDOR where a user exports charts they are not
+        # authorized to view.
+        for model in self._models:
+            if not security_manager.can_access_chart(model):
+                raise ChartAccessDeniedError()
 
     @staticmethod
     def _file_name(model: Slice) -> str:
