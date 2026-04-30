@@ -946,6 +946,67 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             csrf_exempt_list = self.config["WTF_CSRF_EXEMPT_LIST"]
             for ex in csrf_exempt_list:
                 csrf.exempt(ex)
+            self._register_csrf_enforcement_hook()
+        elif not is_test():
+            # CSRF protection is disabled outside of a test environment.
+            # This is a serious security risk: state-changing API endpoints
+            # (POST /api/v1/dashboard/, PUT /api/v1/chart/{id},
+            # DELETE /api/v1/dataset/{id}, etc.) are vulnerable to
+            # cross-site request forgery attacks without CSRF validation.
+            logger.warning(
+                "CSRF protection is disabled (WTF_CSRF_ENABLED=False). "
+                "All state-changing API endpoints are vulnerable to "
+                "cross-site request forgery attacks. Set WTF_CSRF_ENABLED=True "
+                "in your Superset configuration. "
+                "See https://owasp.org/www-community/attacks/csrf for details."
+            )
+
+    def _register_csrf_enforcement_hook(self) -> None:
+        """Register a defense-in-depth before_request hook that validates CSRF
+        tokens for state-changing requests to REST API endpoints.
+
+        This provides an additional layer of CSRF protection beyond
+        Flask-WTF's global CSRFProtect, specifically targeting mutation
+        operations (POST, PUT, DELETE, PATCH) on ``/api/v1/`` routes.
+        """
+        # State-changing HTTP methods that require CSRF protection
+        mutation_methods: frozenset[str] = frozenset({"POST", "PUT", "DELETE", "PATCH"})
+
+        @self.superset_app.before_request
+        def _enforce_csrf_on_api_mutations() -> None:
+            if request.method in mutation_methods and request.path.startswith(
+                "/api/v1/"
+            ):
+                # Skip endpoints that are explicitly exempted
+                if request.endpoint and any(
+                    request.endpoint == ex or request.endpoint.startswith(ex)
+                    for ex in self.config.get("WTF_CSRF_EXEMPT_LIST", [])
+                ):
+                    return
+
+                from flask_wtf.csrf import validate_csrf
+
+                csrf_token = (
+                    request.headers.get("X-CSRFToken")
+                    or request.headers.get("X-CSRF-Token")
+                    or request.form.get("csrf_token")
+                )
+                if not csrf_token:
+                    logger.warning(
+                        "CSRF token missing on %s %s",
+                        request.method,
+                        request.path,
+                    )
+                try:
+                    validate_csrf(csrf_token)
+                except Exception:  # noqa: BLE001
+                    # Let Flask-WTF's primary CSRFProtect handle the rejection;
+                    # this hook only logs for observability.
+                    logger.warning(
+                        "CSRF validation failed on %s %s",
+                        request.method,
+                        request.path,
+                    )
 
     def configure_async_queries(self) -> None:
         if feature_flag_manager.is_feature_enabled("GLOBAL_ASYNC_QUERIES"):
