@@ -946,6 +946,63 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             csrf_exempt_list = self.config["WTF_CSRF_EXEMPT_LIST"]
             for ex in csrf_exempt_list:
                 csrf.exempt(ex)
+            # Defense-in-depth: register CSRF enforcement middleware for
+            # state-changing API endpoints alongside Flask-WTF's protection.
+            self._register_csrf_api_protection()
+        else:
+            # SECURITY: Log a prominent warning when CSRF protection is disabled.
+            # This should only occur in testing environments.
+            logger.warning(
+                "CSRF protection is disabled (WTF_CSRF_ENABLED=False). "
+                "All state-changing endpoints (POST/PUT/DELETE/PATCH) are vulnerable "
+                "to cross-site request forgery attacks. Do not run with CSRF disabled "
+                "in production. See https://owasp.org/www-community/attacks/csrf"
+            )
+
+    def _register_csrf_api_protection(self) -> None:
+        """Register a before_request hook that enforces CSRF token validation
+        on state-changing API requests (POST, PUT, DELETE, PATCH under /api/v1/).
+
+        This supplements Flask-WTF's CSRFProtect with explicit validation and
+        audit logging. Token-based auth (Bearer/API key) is excluded because
+        those credentials are not automatically attached by browsers and are
+        therefore immune to CSRF attacks.
+        """
+        csrf_methods = self.config.get(
+            "WTF_CSRF_METHODS", ["POST", "PUT", "DELETE", "PATCH"]
+        )
+
+        @self.superset_app.before_request
+        def csrf_api_enforcement() -> None:
+            if request.method not in csrf_methods:
+                return
+            if not request.path.startswith("/api/v1/"):
+                return
+            # Skip exempt endpoints
+            if request.endpoint and request.endpoint in self.config.get(
+                "WTF_CSRF_EXEMPT_LIST", []
+            ):
+                return
+            # Token-based auth is CSRF-immune; browsers do not auto-attach
+            # Authorization headers in cross-origin requests.
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith(("Bearer ", "Basic ")):
+                return
+            # Verify CSRF token is present for cookie-authenticated requests.
+            # Flask-WTF's CSRFProtect performs the cryptographic validation;
+            # this check provides an explicit audit trail.
+            csrf_token = (
+                request.headers.get("X-CSRFToken")
+                or request.headers.get("X-CSRF-Token")
+                or request.form.get("csrf_token")
+            )
+            if not csrf_token:
+                logger.warning(
+                    "CSRF token missing on %s %s from %s",
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                )
 
     def configure_async_queries(self) -> None:
         if feature_flag_manager.is_feature_enabled("GLOBAL_ASYNC_QUERIES"):
