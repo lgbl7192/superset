@@ -302,6 +302,11 @@ SQLGLOT_DIALECTS_EXTENSIONS: DialectExtensions | Callable[[], DialectExtensions]
 QUERY_SEARCH_LIMIT = 1000
 
 # Flask-WTF flag for CSRF
+# SECURITY WARNING: This must remain True in production. Disabling CSRF protection
+# exposes all state-changing API endpoints (POST, PUT, DELETE, PATCH) to cross-site
+# request forgery attacks, allowing malicious websites to perform actions on behalf of
+# authenticated users. Only disable for automated testing environments.
+# See: https://owasp.org/www-community/attacks/csrf
 WTF_CSRF_ENABLED = True
 
 # Add endpoints that need to be exempt from CSRF protection
@@ -1655,6 +1660,10 @@ TROUBLESHOOTING_LINK = ""
 
 # CSRF token timeout, set to None for a token that never expires
 WTF_CSRF_TIME_LIMIT = int(timedelta(weeks=1).total_seconds())
+
+# Methods that require CSRF token validation. All state-changing HTTP methods
+# are included to prevent cross-site request forgery on mutation endpoints.
+WTF_CSRF_METHODS = ["POST", "PUT", "DELETE", "PATCH"]
 
 # This link should lead to a page with instructions on how to gain access to a
 # Datasource. It will be placed at the bottom of permissions errors.
