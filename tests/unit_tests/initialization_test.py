@@ -18,9 +18,15 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import OperationalError
 
 from superset.app import AppRootMiddleware, create_app, SupersetApp
+from superset.constants import (
+    CHANGE_ME_SECRET_KEY,
+    KNOWN_INSECURE_SECRET_KEYS,
+    SECRET_KEY_MIN_LENGTH,
+)
 from superset.initialization import SupersetAppInitializer
 
 
@@ -257,3 +263,68 @@ class TestCreateAppRoot:
 
         assert isinstance(app.wsgi_app, AppRootMiddleware)
         assert app.wsgi_app.app_root == "/from-param"
+
+
+def _make_initializer(
+    secret_key: str,
+    *,
+    debug: bool = False,
+    testing: bool = False,
+) -> SupersetAppInitializer:
+    """Build a minimal SupersetAppInitializer with the given SECRET_KEY."""
+    mock_app = MagicMock()
+    mock_app.debug = debug
+    mock_app.config = {"SECRET_KEY": secret_key, "TESTING": testing}
+    return SupersetAppInitializer(mock_app)
+
+
+class TestCheckSecretKey:
+    """Tests for the enhanced SECRET_KEY validation (CVE-2023-27524)."""
+
+    @pytest.mark.parametrize("insecure_key", list(KNOWN_INSECURE_SECRET_KEYS))
+    def test_known_insecure_key_raises_in_production(self, insecure_key: str) -> None:
+        initializer = _make_initializer(insecure_key)
+        with pytest.raises(RuntimeError, match="Insecure SECRET_KEY detected"):
+            initializer.check_secret_key()
+
+    @pytest.mark.parametrize("insecure_key", list(KNOWN_INSECURE_SECRET_KEYS))
+    def test_known_insecure_key_warns_in_debug(self, insecure_key: str) -> None:
+        initializer = _make_initializer(insecure_key, debug=True)
+        # Should not raise; only warns
+        initializer.check_secret_key()
+
+    @pytest.mark.parametrize("insecure_key", list(KNOWN_INSECURE_SECRET_KEYS))
+    def test_known_insecure_key_warns_in_testing(self, insecure_key: str) -> None:
+        initializer = _make_initializer(insecure_key, testing=True)
+        initializer.check_secret_key()
+
+    def test_short_key_raises_in_production(self) -> None:
+        short_key = "a" * (SECRET_KEY_MIN_LENGTH - 1)
+        initializer = _make_initializer(short_key)
+        with pytest.raises(RuntimeError, match="SECRET_KEY is too short"):
+            initializer.check_secret_key()
+
+    def test_short_key_warns_in_debug(self) -> None:
+        short_key = "a" * (SECRET_KEY_MIN_LENGTH - 1)
+        initializer = _make_initializer(short_key, debug=True)
+        initializer.check_secret_key()
+
+    def test_valid_key_passes(self) -> None:
+        valid_key = "x" * SECRET_KEY_MIN_LENGTH
+        initializer = _make_initializer(valid_key)
+        initializer.check_secret_key()
+
+    def test_long_random_key_passes(self) -> None:
+        long_key = "Kx9wP2qR5tV8zA3eH6jN0mC4bF7gL1iO" * 2
+        initializer = _make_initializer(long_key)
+        initializer.check_secret_key()
+
+    def test_change_me_default_raises(self) -> None:
+        initializer = _make_initializer(CHANGE_ME_SECRET_KEY)
+        with pytest.raises(RuntimeError, match="Insecure SECRET_KEY detected"):
+            initializer.check_secret_key()
+
+    def test_exact_min_length_key_passes(self) -> None:
+        key = "a" * SECRET_KEY_MIN_LENGTH
+        initializer = _make_initializer(key)
+        initializer.check_secret_key()

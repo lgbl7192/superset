@@ -19,7 +19,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import sys
 from typing import Any, Callable, TYPE_CHECKING
 
 import wtforms_json
@@ -37,7 +36,10 @@ from flask_compress import Compress
 from flask_session import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from superset.constants import CHANGE_ME_SECRET_KEY
+from superset.constants import (
+    KNOWN_INSECURE_SECRET_KEYS,
+    SECRET_KEY_MIN_LENGTH,
+)
 from superset.databases.utils import make_url_safe
 from superset.extensions import (
     _event_logger,
@@ -626,33 +628,68 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         self.init_all_dependencies_and_extensions()
 
     def check_secret_key(self) -> None:
-        def log_default_secret_key_warning() -> None:
+        """Validate that SECRET_KEY is safe for production use.
+
+        Rejects keys that match any entry in KNOWN_INSECURE_SECRET_KEYS
+        (CVE-2023-27524 and other common placeholders) or that are shorter
+        than SECRET_KEY_MIN_LENGTH characters.  In debug/testing mode only
+        a warning is emitted; in production the application refuses to start.
+        """
+
+        def _log_insecure_key_banner(reason: str) -> None:
             top_banner = 80 * "-" + "\n" + 36 * " " + "WARNING\n" + 80 * "-"
             bottom_banner = 80 * "-" + "\n" + 80 * "-"
             logger.warning(top_banner)
             logger.warning(
-                "A Default SECRET_KEY was detected, please use superset_config.py "
-                "to override it.\n"
+                "%s\n"
                 "Use a strong complex alphanumeric string and use a tool to help"
                 " you generate \n"
-                "a sufficiently random sequence, ex: openssl rand -base64 42 \n"
+                "a sufficiently random sequence, ex: openssl rand -base64 42\n"
+                "Then set it via the SUPERSET_SECRET_KEY environment variable or\n"
+                "in superset_config.py.\n"
                 "For more info, see: https://superset.apache.org/docs/"
-                "configuration/configuring-superset#specifying-a-secret_key"
+                "configuration/configuring-superset#specifying-a-secret_key",
+                reason,
             )
             logger.warning(bottom_banner)
 
-        if self.config["SECRET_KEY"] == CHANGE_ME_SECRET_KEY:
-            if (
-                self.superset_app.debug
-                or self.superset_app.config["TESTING"]
-                or is_test()
-            ):
-                logger.warning("Debug mode identified with default secret key")
-                log_default_secret_key_warning()
+        secret_key: str = self.config["SECRET_KEY"]
+        is_debug_or_test = (
+            self.superset_app.debug or self.superset_app.config["TESTING"] or is_test()
+        )
+
+        # Check against known insecure placeholder values (CVE-2023-27524)
+        if secret_key in KNOWN_INSECURE_SECRET_KEYS:
+            reason = (
+                "A known insecure SECRET_KEY was detected "
+                "(matched a placeholder value). "
+                "Please override it immediately."
+            )
+            if is_debug_or_test:
+                logger.warning("Debug/test mode identified with insecure secret key")
+                _log_insecure_key_banner(reason)
                 return
-            log_default_secret_key_warning()
+            _log_insecure_key_banner(reason)
             logger.error("Refusing to start due to insecure SECRET_KEY")
-            sys.exit(1)
+            raise RuntimeError(
+                "Insecure SECRET_KEY detected. See log output above for details."
+            )
+
+        # Reject keys that are too short to resist brute-force attacks
+        if len(secret_key) < SECRET_KEY_MIN_LENGTH:
+            reason = (
+                f"SECRET_KEY is only {len(secret_key)} characters long. "
+                f"A minimum of {SECRET_KEY_MIN_LENGTH} characters is required."
+            )
+            if is_debug_or_test:
+                logger.warning("Debug/test mode identified with short secret key")
+                _log_insecure_key_banner(reason)
+                return
+            _log_insecure_key_banner(reason)
+            logger.error("Refusing to start due to insecure SECRET_KEY")
+            raise RuntimeError(
+                "SECRET_KEY is too short. See log output above for details."
+            )
 
     def configure_session(self) -> None:
         if self.config["SESSION_SERVER_SIDE"]:
