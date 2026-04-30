@@ -81,7 +81,7 @@ from superset.commands.importers.v1.utils import get_contents_from_bundle
 from superset.constants import MODEL_API_RW_METHOD_PERMISSION_MAP, RouteMethod
 from superset.daos.chart import ChartDAO
 from superset.exceptions import ScreenshotImageNotAvailableException
-from superset.extensions import event_logger, security_manager
+from superset.extensions import db, event_logger, security_manager
 from superset.models.slice import Slice
 from superset.tasks.thumbnails import cache_chart_thumbnail
 from superset.tasks.utils import get_current_user
@@ -853,12 +853,33 @@ class ChartRestApi(BaseSupersetModelRestApi):
               $ref: '#/components/responses/400'
             401:
               $ref: '#/components/responses/401'
+            403:
+              $ref: '#/components/responses/403'
             404:
               $ref: '#/components/responses/404'
             500:
               $ref: '#/components/responses/500'
         """
         requested_ids = kwargs["rison"]
+
+        # Per-object access check: verify the requesting user has read
+        # access to each chart, preventing IDOR via ID enumeration.
+        if not security_manager.can_access_all_datasources():
+            accessible_charts = ChartDAO.find_by_ids(requested_ids)
+            accessible_ids = {chart.id for chart in accessible_charts}
+            inaccessible_ids = [
+                cid for cid in requested_ids if cid not in accessible_ids
+            ]
+            if inaccessible_ids:
+                existing_count = (
+                    db.session.query(Slice.id)
+                    .filter(Slice.id.in_(inaccessible_ids))
+                    .count()
+                )
+                if existing_count > 0:
+                    return self.response_403()
+                return self.response_404()
+
         timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
         root = f"chart_export_{timestamp}"
         filename = f"{root}.zip"

@@ -1764,7 +1764,7 @@ class TestChartApi(ApiOwnersTestCaseMixin, InsertChartMixin, SupersetTestCase):
 
     def test_export_chart_gamma(self):
         """
-        Chart API: Test export chart has gamma
+        Chart API: Test export chart as gamma returns 403 for inaccessible charts
         """
         example_chart = db.session.query(Slice).all()[0]
         argument = [example_chart.id]
@@ -1773,7 +1773,28 @@ class TestChartApi(ApiOwnersTestCaseMixin, InsertChartMixin, SupersetTestCase):
         self.login(GAMMA_USERNAME)
         rv = self.client.get(uri)
 
-        assert rv.status_code == 404
+        # Gamma user lacks datasource access so the chart is inaccessible;
+        # the endpoint returns 403 (not 404) to prevent IDOR enumeration.
+        assert rv.status_code == 403
+
+    def test_export_chart_cross_user_forbidden(self):
+        """
+        Chart API: Regression test — exporting another user's chart returns 403
+        when the requesting user lacks read access (IDOR prevention).
+        """
+        admin = self.get_user("admin")
+        chart = self.insert_chart("admin_only_chart", [admin.id], 1)
+
+        self.login(GAMMA_USERNAME)
+        argument = [chart.id]
+        uri = f"api/v1/chart/export/?q={rison.dumps(argument)}"
+        rv = self.client.get(uri)
+
+        assert rv.status_code == 403
+
+        # cleanup
+        db.session.delete(chart)
+        db.session.commit()
 
     @patch("superset.commands.database.importers.v1.utils.add_permissions")
     def test_import_chart(self, mock_add_permissions):
