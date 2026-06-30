@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      { "command": "./hooks/flag-sensitive-paths.sh" }
+    ]
+  }
+}

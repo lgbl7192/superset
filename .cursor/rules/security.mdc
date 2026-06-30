@@ -1,0 +1,18 @@
+---
+description: Security and dependency remediation standards for Superset
+globs: ["requirements/*.txt", "pyproject.toml", "superset-frontend/package.json"]
+alwaysApply: false
+---
+
+When remediating a flagged dependency in Superset:
+- Superset has two independent dependency surfaces — Python (requirements/*.txt,
+  pyproject.toml) and the frontend (superset-frontend/package.json). Identify
+  which surface is affected before proposing a fix.
+- Never silently upgrade a major version — flag it and explain the breaking
+  change risk. Versions here are tightly pinned for a reason; pandas, pyarrow,
+  and flask-appbuilder versions are load-bearing for the data layer.
+- Always check internal usage via codebase search before patching.
+- Never touch superset/security/ or SQL Lab execution paths without
+  flagging for human review first.
+- Any patches to Python dependencies must remain MyPy compliant and follow
+  the type hint standards in dev-standard.mdc.
